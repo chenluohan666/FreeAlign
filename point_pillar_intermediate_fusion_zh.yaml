@@ -1,0 +1,118 @@
+name: point_pillar_intermediate_fusion # 这个参数与当前时间戳一起定义保存模型的文件夹名称
+root_dir: "v2xset/train" # 训练数据的位置。可以是 opv2v/train 或 v2xset/train
+validate_dir: "v2xset/validate" # 在训练期间，它定义验证文件夹。在测试期间，它定义测试文件夹路径
+
+yaml_parser: "load_point_pillar_params" # 不同骨干网络需要特定的加载函数
+
+train_params: # 通用训练参数
+  batch_size: &batch_size 2 # 批次大小
+  epoches: 60 # 训练轮数
+  eval_freq: 1 # 评估频率（每多少个epoch评估一次）
+  save_freq: 1 # 保存频率（每多少个epoch保存一次）
+
+wild_setting: # 与噪声相关的设置
+  async: true # 是否启用异步通信
+  async_mode: 'sim' # 异步模式（仿真）
+  async_overhead: 100 # 异步开销（毫秒）
+  backbone_delay: 10 # 骨干网络延迟（毫秒）
+  data_size: 1.06 # 数据大小（MB）
+  loc_err: true # 是否启用位置误差
+  ryp_std: 0.2 # 欧拉角（roll, yaw, pitch）的标准差
+  seed: 25 # 随机种子
+  transmission_speed: 27 # 传输速度（MB/s）
+  xyz_std: 0.2 # x, y, z 坐标的误差标准差
+
+fusion: # 融合策略设置
+  core_method: 'IntermediateFusionDataset' # 支持 LateFusionDataset, EarlyFusionDataset, 和 IntermediateFusionDataset
+  args: # 融合参数
+    cur_ego_pose_flag: True # 当设置为True时，连接代理捕获LiDAR数据的时间与自车接收提取特征的时间之间没有时间差
+    # 等同于实现STCM。当设置为False时，必须使用STCM。为了验证STCM，V2X-ViT会将此设置为False。
+
+# 预处理相关设置
+preprocess: # 预处理器参数
+  # 选项: BasePreprocessor, SpVoxelPreprocessor, BevPreprocessor
+  core_method: 'SpVoxelPreprocessor' # 体素化预处理器
+  args: # 体素化参数
+    voxel_size: &voxel_size [0.4, 0.4, 4] # PointPillar的体素分辨率
+    max_points_per_voxel: 32 # 每个体素允许的最大点数
+    max_voxel_train: 32000 # 训练期间的最大体素数
+    max_voxel_test: 70000 # 测试期间的最大体素数
+  cav_lidar_range: &cav_lidar [-140.8, -40, -3, 140.8, 40, 1] # LiDAR点云裁剪范围
+
+# 数据增强选项
+data_augment: # 数据增强配置
+  - NAME: random_world_flip # 随机世界翻转
+    ALONG_AXIS_LIST: [ 'x' ] # 沿x轴翻转
+
+  - NAME: random_world_rotation # 随机世界旋转
+    WORLD_ROT_ANGLE: [ -0.78539816, 0.78539816 ] # 旋转角度范围（弧度）
+
+  - NAME: random_world_scaling # 随机世界缩放
+    WORLD_SCALE_RANGE: [ 0.95, 1.05 ] # 缩放范围
+
+# 后处理相关设置
+postprocess: # 后处理配置
+  core_method: 'VoxelPostprocessor' # 支持 VoxelPostprocessor 和 BevPostprocessor
+  anchor_args: # 锚框生成器参数
+    cav_lidar_range: *cav_lidar # 范围与LiDAR裁剪范围一致，以生成正确的锚框
+    l: 3.9 # 锚框的默认长度
+    w: 1.6 # 锚框的默认宽度
+    h: 1.56 # 锚框的默认高度
+    r: [0, 90] # 偏航角。0, 90表示对于每个体素，会生成两个具有0度和90度偏航角的锚框
+    feature_stride: 2 # 特征图相比输入体素张量缩小了两倍
+    num: &achor_num 2 # 对于特征图中的每个位置，会生成2个锚框
+
+  target_args: # 用于为目标检测生成正负样本
+    pos_threshold: 0.6 # 正样本阈值
+    neg_threshold: 0.45 # 负样本阈值
+    score_threshold: 0.20 # 分数阈值
+
+  order: 'hwl' # hwl或lwh（高度、宽度、长度的顺序）
+  max_num: 100 # 单帧中的最大目标数量。使用此数字确保同一批次中不同帧的维度相同
+  nms_thresh: 0.15 # 非最大抑制阈值
+
+# 模型相关设置
+model: # 模型配置
+  core_method: point_pillar_opv2v # 训练器将加载具有相同名称的模型python文件
+  args: # PointPillar模型的详细参数
+    voxel_size: *voxel_size # 体素大小
+    lidar_range: *cav_lidar # LiDAR范围
+    anchor_number: *achor_num # 锚框数量
+
+    pillar_vfe: # Pillar VFE (Voxel Feature Encoder) 参数
+      use_norm: true # 是否使用归一化
+      with_distance: false # 是否包含距离信息
+      use_absolute_xyz: true # 是否使用绝对xyz坐标
+      num_filters: [64] # 滤波器数量
+
+    point_pillar_scatter: # PointPillar散射层参数
+      num_features: 64 # 特征数量
+
+    base_bev_backbone: # 基础BEV（鸟瞰图）骨干网络参数
+      layer_nums: [3, 5, 8] # 各层的数量
+      layer_strides: [2, 2, 2] # 各层的步长
+      num_filters: [64, 128, 256] # 各层的滤波器数量
+      upsample_strides: [1, 2, 4] # 上采样步长
+      num_upsample_filter: [128, 128, 128] # 上采样滤波器数量
+      compression: 0 # 是否在融合前压缩特征以减少带宽（0表示不压缩）
+      backbone_fix: false # 训练期间是否固定PointPillar骨干网络权重
+
+    anchor_num: *achor_num # 锚框数量
+
+loss: # 损失函数
+  core_method: point_pillar_loss # 训练器将加载具有相同名称的损失函数
+  args: # 损失函数参数
+    cls_weight: 1.0 # 分类权重
+    reg: 2.0 # 回归权重
+
+optimizer: # 优化器设置
+  core_method: Adam # 名称必须存在于PyTorch优化器库中
+  lr: 0.002 # 学习率
+  args: # 优化器参数
+    eps: 1e-10 # 防止除零的小常数
+    weight_decay: 1e-4 # 权重衰减
+
+lr_scheduler: # 学习率调度器
+  core_method: multistep # 支持 step, multistep 和 Exponential
+  gamma: 0.1 # 衰减率
+  step_size: [15, 30] # 学习率衰减的步长（在第15和30个epoch时衰减）
