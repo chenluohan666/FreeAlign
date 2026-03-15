@@ -1,165 +1,360 @@
+# =============================================================================
+# FreeAlign 配置文件 - DAIR-V2X数据集
+# 基于PointPillar的协同3D目标检测，使用最大融合策略和FreeAlign时空对齐
+# =============================================================================
+
+# 实验名称标识，用于保存模型和日志时区分不同实验
 name: dairv2x_point_pillar_lidar_max_freealign
+
+# 数据集根目录路径，包含协同车辆-基础设施数据
 data_dir: "dataset/my_dair_v2x/v2x_c/cooperative-vehicle-infrastructure"
+
+# 训练数据集的JSON索引文件路径，包含训练样本的元数据信息
 root_dir: "dataset/my_dair_v2x/v2x_c/cooperative-vehicle-infrastructure/train.json"
+
+# 验证数据集的JSON索引文件路径，用于训练过程中验证模型性能
 validate_dir: "dataset/my_dair_v2x/v2x_c/cooperative-vehicle-infrastructure/val.json"
+
+# 测试数据集的JSON索引文件路径，用于最终模型评估
 test_dir: "dataset/my_dair_v2x/v2x_c/cooperative-vehicle-infrastructure/val.json"
 
 
+# =============================================================================
+# 噪声设置 - 用于模拟真实场景中的定位噪声
+# =============================================================================
 noise_setting:
+  # 是否添加噪声，False表示使用GT位姿，True表示添加模拟噪声
   add_noise: False
+  # 噪声参数配置
   args: 
+    # 位置噪声的标准差(米)，值越大位置偏移越明显
     pos_std: 0.2
+    # 旋转噪声的标准差(弧度)，值越大角度偏移越明显
     rot_std: 0.2
+    # 位置噪声的均值(米)，通常设为0表示无偏估计
     pos_mean: 0
+    # 旋转噪声的均值(弧度)，通常设为0表示无偏估计
     rot_mean: 0
 
 
+# YAML解析器函数名，用于解析和验证配置参数
 yaml_parser: "load_point_pillar_params"
+
+# =============================================================================
+# 训练参数配置
+# =============================================================================
 train_params:
+  # 批量大小，每次训练迭代使用的样本数，使用&锚点定义便于后续引用
   batch_size: &batch_size 4
+  # 总训练轮数，模型会在整个数据集上训练30次
   epoches: 30
+  # 验证频率，每训练2个epoch进行一次验证
   eval_freq: 2
+  # 模型保存频率，每训练3个epoch保存一次模型检查点
   save_freq: 3
+  # 最大协同车辆数(CAV)，包括ego车辆和协作车辆，使用&锚点定义
   max_cav: &max_cav 5
 
+# 输入数据源类型，'lidar'表示使用激光雷达点云数据
 input_source: ['lidar']
+
+# 标签数据类型，'lidar'表示使用激光雷达标注的3D边界框作为真值
 label_type: 'lidar'
 
+# 通信范围(米)，只在此范围内的CAV才会进行协同感知
 comm_range: 100
 
+# =============================================================================
+# 融合配置 - 定义协同感知的融合策略
+# =============================================================================
 fusion:
+  # 融合核心方法：
+  # - 'intermediate': 中间特征融合，在BEV特征层进行融合
+  # - 'late': 后期融合，在检测结果层进行融合
+  # - 'early': 早期融合，在原始数据层进行融合
   core_method: 'intermediate'
+  # 数据集类型，用于选择相应的数据处理策略
   dataset: 'dairv2x'
+  # 融合参数
   args:
+    # 是否先进行投影变换，false表示在融合时再进行坐标变换
     proj_first: false
 
+# =============================================================================
+# FreeAlign 盒子对齐配置 - 论文核心模块
+# 用于在无外部定位设备情况下实现时空对齐
+# =============================================================================
 box_align:
+  # 训练集第一阶段检测结果文件，包含预计算的检测框用于图匹配
   train_result: "opencood/logs/coalign_precalc/dairv2x/train/stage1_boxes.json"
+  # 验证集第一阶段检测结果文件
   val_result: "opencood/logs/coalign_precalc/dairv2x/val/stage1_boxes.json"
+  # 测试集第一阶段检测结果文件
   test_result: "opencood/logs/coalign_precalc/dairv2x/test/stage1_boxes.json"
+  # FreeAlign模式选择：
+  # - "train": 使用训练集预计算结果进行对齐
+  # - "val": 使用验证集预计算结果
+  # - "none": 不使用FreeAlign
   free_align: "train"
+  # 是否使用图神经网络(GNN)进行边缘特征学习，false表示使用简单距离特征
   gnn: false
+  # 是否不使用位姿信息，true表示完全依赖FreeAlign进行对齐
   no_pose: true
+  # 最小锚点数量，用于图匹配时确定共同子图的最小节点数
   min_anchor: 4
+  # 锚点匹配误差阈值(米)，超过此值的节点对不会被加入锚点列表
   anchor_error: 0.3
+  # 盒子匹配误差阈值(米)，用于判断两个检测框是否匹配
   box_error: 0.5
+  # 对齐算法参数
   args:
+    # 是否使用不确定性权重，根据检测置信度调整对齐权重
     use_uncertainty: true
+    # 是否使用SE2(二维特殊欧几里得群)进行位姿估计
+    # 注意：此处有拼写错误，应为"true"
     landmark_SE2: tru
+    # 是否使用自适应锚点选择策略
     adaptive_landmark: false
+    # 是否对不确定性进行归一化处理
     normalize_uncertainty: false
+    # 是否放弃困难样本(对齐失败的情况)
     abandon_hard_cases: true
+    # 是否丢弃难以匹配的检测框
     drop_hard_boxes: true
 
-# preprocess-related
+# =============================================================================
+# 预处理配置 - 点云体素化处理
+# =============================================================================
 preprocess:
-  # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
+  # 预处理器类型选择：
+  # - BasePreprocessor: 基础预处理器
+  # - VoxelPreprocessor: 体素预处理器
+  # - BevPreprocessor: BEV预处理器
+  # - SpVoxelPreprocessor: 稀疏体素预处理器，效率更高
   core_method: 'SpVoxelPreprocessor'
+  # 预处理器参数
   args:
+    # 体素尺寸 [x, y, z] (米)，定义体素在三个维度的大小
+    # 使用&锚点定义便于后续引用
     voxel_size: &voxel_size [0.4, 0.4, 4]
+    # 每个体素内最大点数，超过则随机采样
     max_points_per_voxel: 32
+    # 训练时最大体素数量，限制显存使用
     max_voxel_train: 32000
+    # 测试时最大体素数量，测试时可设置更大以获得更完整覆盖
     max_voxel_test: 70000
-  # lidar range for each individual cav.
+  # 单个CAV的激光雷达感知范围 [x_min, y_min, z_min, x_max, y_max, z_max] (米)
+  # 定义了点云处理的空间边界，使用&锚点定义便于后续引用
   cav_lidar_range: &cav_lidar [-100.8, -40, -3.5, 100.8, 40, 1.5]
 
+# =============================================================================
+# 数据增强配置 - 训练时对数据进行随机变换以提高泛化能力
+# =============================================================================
 data_augment:
+  # 随机世界坐标翻转
   - NAME: random_world_flip
+    # 沿哪些轴进行翻转，'x'表示沿x轴翻转
     ALONG_AXIS_LIST: [ 'x' ]
 
+  # 随机世界坐标旋转
   - NAME: random_world_rotation
+    # 旋转角度范围 [最小值, 最大值] (弧度)
+    # -0.78539816 ≈ -45度, 0.78539816 ≈ 45度
     WORLD_ROT_ANGLE: [ -0.78539816, 0.78539816 ]
 
+  # 随机世界坐标缩放
   - NAME: random_world_scaling
+    # 缩放比例范围 [最小值, 最大值]
+    # 0.95表示缩小5%，1.05表示放大5%
     WORLD_SCALE_RANGE: [ 0.95, 1.05 ]
 
-# anchor box related
+# =============================================================================
+# 后处理配置 - 检测结果的解码和后处理
+# =============================================================================
 postprocess:
-  core_method: 'VoxelPostprocessor' # VoxelPostprocessor, BevPostprocessor supported
+  # 后处理器类型：
+  # - VoxelPostprocessor: 体素后处理器
+  # - BevPostprocessor: BEV后处理器
+  core_method: 'VoxelPostprocessor'
+  # 真值范围，引用cav_lidar_range锚点
   gt_range: *cav_lidar
+  # 锚框(Anchor Box)参数配置
   anchor_args:
+    # 锚框生成的激光雷达范围，引用cav_lidar_range锚点
     cav_lidar_range: *cav_lidar
+    # 锚框长度 (米)，对应车辆平均长度
     l: 4.5
+    # 锚框宽度 (米)，对应车辆平均宽度
     w: 2
+    # 锚框高度 (米)，对应车辆平均高度
     h: 1.56
+    # 锚框朝向角度 (度)，[0, 90]表示生成0度和90度两个朝向的锚框
     r: &anchor_yaw [0, 90]
+    # 特征图步长，表示锚框相对于原始特征图的下采样倍数
     feature_stride: 2
+    # 每个位置每个朝向的锚框数量，与朝向角度数量对应
     num: &anchor_num 2
+  # 目标分配参数，用于确定锚框的正负样本
   target_args:
+    # 正样本IoU阈值，IoU超过此值的锚框被标记为正样本
     pos_threshold: 0.6
+    # 负样本IoU阈值，IoU低于此值的锚框被标记为负样本
     neg_threshold: 0.45
+    # 检测分数阈值，低于此值的检测结果会被过滤
     score_threshold: 0.20
-  order: 'hwl' # hwl or lwh
-  max_num: 100 # maximum number of objects in a single frame. use this number to make sure different frames has the same dimension in the same batch
+  # 边界框尺寸顺序：
+  # - 'hwl': 高度-宽度-长度顺序
+  # - 'lwh': 长度-宽度-高度顺序
+  order: 'hwl'
+  # 单帧最大检测目标数，用于保证同一batch中不同帧维度一致
+  max_num: 100
+  # 非极大值抑制(NMS)阈值，用于去除重叠的检测框
   nms_thresh: 0.15
+  # 方向预测参数配置
   dir_args: &dir_args
+    # 方向偏移角度 (弧度)，0.7853 ≈ 45度
+    # 用于将连续方向离散化为多个bin
     dir_offset: 0.7853
+    # 方向分类的bin数量，2表示将方向分为2个区间
     num_bins: 2
+    # 锚框朝向角度，引用anchor_yaw锚点
     anchor_yaw: *anchor_yaw
 
-# model related
+# =============================================================================
+# 模型配置 - 定义网络架构
+# =============================================================================
 model:
+  # 模型核心方法：
+  # - point_pillar_baseline_multiscale: 多尺度PointPillar基线模型
+  # - point_pillar_coalign: CoAlign模型
+  # - point_pillar_intermediate: 中间融合模型
   core_method: point_pillar_baseline_multiscale
+  # 模型参数配置
   args:
+    # 体素尺寸，引用voxel_size锚点
     voxel_size: *voxel_size
+    # 激光雷达感知范围，引用cav_lidar_range锚点
     lidar_range: *cav_lidar
+    # 锚框数量，引用anchor_num锚点
     anchor_number: *anchor_num
 
+    # Pillar VFE (Voxel Feature Encoder) 配置
+    # 将点云特征编码为体素特征
     pillar_vfe:
+      # 是否使用批归一化(Batch Normalization)
       use_norm: true
+      # 是否使用点到体素中心的距离作为特征
       with_distance: false
+      # 是否使用绝对XYZ坐标作为特征
       use_absolute_xyz: true
+      # VFE网络各层滤波器数量
       num_filters: [64]
+    
+    # Point Pillar Scatter配置
+    # 将稀疏体素特征散射到伪图像(空间特征图)
     point_pillar_scatter:
+      # 输出特征通道数，与pillar_vfe的num_filters[-1]对应
       num_features: 64
 
-    base_bev_backbone: # backbone will downsample 2x
+    # BEV (Bird's Eye View) 主干网络配置
+    # 用于从伪图像中提取多尺度特征
+    base_bev_backbone:
+      # 各下采样阶段的残差块数量
       layer_nums: [3, 5, 8]
+      # 各阶段的下采样步长
       layer_strides: [2, 2, 2]
+      # 各阶段的输出通道数
       num_filters: [64, 128, 256]
+      # 各阶段特征的上采样步长，用于特征金字塔
       upsample_strides: [1, 2, 4]
+      # 各阶段上采样后的通道数
       num_upsample_filter: [128, 128, 128]
 
+    # 融合方法选择：
+    # - max: 最大融合，取各CAV特征的最大值
+    # - att: 注意力融合，使用自注意力机制融合
     fusion_method: max
 
+    # 特征压缩头配置，用于减少特征维度
     shrink_header:
+      # 卷积核大小
       kernal_size: [ 3 ]
+      # 卷积步长
       stride: [ 1 ]
+      # 卷积填充大小
       padding: [ 1 ]
+      # 输出通道数
       dim: [ 256 ]
-      input_dim: 384 # 128 * 3
+      # 输入通道数，128 * 3 = 384 (来自三个尺度的特征拼接)
+      input_dim: 384
 
+    # 方向预测参数，引用dir_args锚点
     dir_args: *dir_args
 
-    
-
+# =============================================================================
+# 损失函数配置
+# =============================================================================
 loss:
+  # 损失函数核心方法
   core_method: point_pillar_loss
+  # 损失函数参数配置
   args:
+    # 正样本分类损失权重，用于处理正负样本不平衡
     pos_cls_weight: 2.0
+    # 分类损失配置
     cls:
+      # 损失类型：SigmoidFocalLoss，专门用于处理类别不平衡
       type: 'SigmoidFocalLoss'
+      # Focal Loss的alpha参数，平衡正负样本的重要性
       alpha: 0.25
+      # Focal Loss的gamma参数，控制易分样本的权重衰减
       gamma: 2.0
+      # 分类损失在总损失中的权重
       weight: 2.0
+    # 回归损失配置
     reg:
+      # 损失类型：加权平滑L1损失，对异常值更鲁棒
       type: 'WeightedSmoothL1Loss'
+      # Smooth L1 Loss的平滑参数，控制从L2到L1的过渡点
       sigma: 3.0
+      # 是否按维度(code-wise)计算损失
       codewise: true
+      # 回归损失在总损失中的权重
       weight: 2.0
+    # 方向分类损失配置
     dir:
+      # 损失类型：加权Softmax分类损失
       type: 'WeightedSoftmaxClassificationLoss'
+      # 方向损失在总损失中的权重
       weight: 0.2
+      # 方向参数，引用dir_args锚点
       args: *dir_args
 
+# =============================================================================
+# 优化器配置
+# =============================================================================
 optimizer:
+  # 优化器类型：Adam，自适应学习率优化器
   core_method: Adam
+  # 初始学习率
   lr: 0.002
+  # 优化器参数
   args:
+    # 数值稳定性的epsilon值，防止除零错误
     eps: 1e-10
+    # L2正则化权重衰减系数，防止过拟合
     weight_decay: 1e-4
 
+# =============================================================================
+# 学习率调度器配置
+# =============================================================================
 lr_scheduler:
-  core_method: multistep #step, multistep and Exponential support
+  # 调度器类型：
+  # - step: 阶梯式衰减
+  # - multistep: 多阶梯式衰减
+  # - Exponential: 指数衰减
+  core_method: multistep
+  # 学习率衰减系数，每次衰减乘以此值
   gamma: 0.1
+  # 学习率衰减的epoch节点，在第10和15个epoch时各衰减一次
   step_size: [10, 15]
