@@ -112,7 +112,7 @@ box_align:
     use_uncertainty: true
     # 是否使用SE2(二维特殊欧几里得群)进行位姿估计
     # 注意：此处有拼写错误，应为"true"
-    landmark_SE2: tru
+    landmark_SE2: true
     # 是否使用自适应锚点选择策略
     adaptive_landmark: false
     # 是否对不确定性进行归一化处理
